@@ -1,3 +1,5 @@
+import os; os.environ['PANDAS_TA_NUMBA'] = '0'
+
 import ccxt, pandas_ta as ta, pandas as pd, time, os
 from flask import Flask
 from threading import Thread
