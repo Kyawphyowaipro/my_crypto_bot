@@ -14,9 +14,8 @@ config = {
     'POSITION_SIZE': 20.0
 }
 
-TELEGRAM_TOKEN = 'YOUR_BOT_TOKEN'
-CHAT_ID = 'YOUR_CHAT_ID' # မင်းရဲ့ Telegram Chat ID (Security အတွက်)
-
+TELEGRAM_TOKEN = '7932915582:AAHT3p1J1gySMeWI5lJfVC2-hjqOR_KrgJ4'
+CHAT_ID = '5020993606'
 stats = {'total_trades': 0, 'wins': 0, 'losses': 0, 'total_pnl': 0.0, 'history': []}
 
 app = Flask('')
@@ -96,7 +95,7 @@ def is_engulfing(df):
     return None
 
 def trade_logic():
-    ex = ccxt.binance({'apiKey': 'YOUR_API', 'secret': 'YOUR_SECRET', 'enableRateLimit': True, 'options': {'defaultType': 'future'}})
+    ex = ccxt.binance({'apiKey': 'L48AM3ytDBa3QUfW9qeLZj5X9xTJK8GK80Vc9fR4ml2Eo8QNRcjNdKisiz6EWj8F', 'secret': 'EESYNU9Y4vwjHomlcGxglc25cvTpHU9jom88E2shCMW6q4xQyRCS833sBr26fORT', 'enableRateLimit': True, 'options': {'defaultType': 'future'}})
     if config['MODE'] == 'DEMO': ex.set_sandbox_mode(True)
     
     last_health = time.time()
