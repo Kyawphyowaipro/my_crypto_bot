@@ -1,5 +1,6 @@
 ccxt
 pandas
-flask
-gunicorn
 stockstats
+flask
+pytz
+requests
