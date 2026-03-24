@@ -4,7 +4,6 @@ from flask import Flask
 from threading import Thread
 
 # --- [ CONFIGURATION ] ---
-# Key ၆ ခုလုံးကို Environment ကနေ တိုက်ရိုက်ဖတ်ပါတယ်
 config = {
     'BINANCE_API': os.getenv('BINANCE_API'),
     'BINANCE_SECRET': os.getenv('BINANCE_SECRET'),
@@ -12,41 +11,66 @@ config = {
     'TELEGRAM_TOKEN': os.getenv('TELEGRAM_TOKEN'),
     'CHAT_ID': os.getenv('TELEGRAM_CHAT_ID'),
     'GH_TOKEN': os.getenv('GH_TOKEN'),
-    'GH_REPO': 'Kyawphyowaipro/my_crypto_bot', # မင်းရဲ့ Repo နာမည်
+    'GH_REPO': 'Kyawphyowaipro/my_crypto_bot',
     'SYMBOL': ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT'],
     'LEVERAGE': 20,
     'IS_RUNNING': True,
-    'INITIAL_DEPOSIT': 0.0 # /deposit command နဲ့ သတ်မှတ်ရန်
+    'INITIAL_DEPOSIT': 0.0,
+    'AI_MODE': False # AI နှင့် စကားပြောရန် Mode
 }
 
-# --- [ EXPERT AI SETUP ] ---
-SYSTEM_PROMPT = """You are a 'Trinity Expert AI':
-1. Senior Crypto Trader (Technical Analysis Expert)
-2. Professional Developer (Python & API Expert)
-3. Finance Advisor (Risk Management Expert)
-Answer in Burmese or English concisely."""
-
+# --- [ AI SETUP ] ---
+SYSTEM_PROMPT = "You are a Trinity Expert AI (Trader, Dev, Finance Advisor). Provide professional advice in Burmese."
 try:
     if config['GEMINI_KEY']:
         genai.configure(api_key=config['GEMINI_KEY'])
         ai_model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=SYSTEM_PROMPT)
-    else:
-        ai_model = None
-except:
-    ai_model = None
+    else: ai_model = None
+except: ai_model = None
 
-# --- [ WEB SERVER FOR RENDER ] ---
 app = Flask('')
 @app.route('/')
-def home(): return "Trinity Bot is Active!"
+def home(): return "Bot is Online and Healthy!"
 
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+# --- [ GITHUB EDIT LOGIC ] ---
+def update_github(file_path, content):
+    try:
+        url = f"https://api.github.com/repos/{config['GH_REPO']}/contents/{file_path}"
+        headers = {"Authorization": f"token {config['GH_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+        res = requests.get(url, headers=headers).json()
+        sha = res.get('sha')
+        encoded_content = base64.b64encode(content.encode()).decode()
+        data = {"message": "Update via Telegram Bot", "content": encoded_content, "sha": sha}
+        return requests.put(url, headers=headers, json=data).status_code == 200
+    except: return False
 
-# --- [ TELEGRAM FUNCTIONS ] ---
+# --- [ BINANCE TOOLS ] ---
+def get_balance():
+    try:
+        ex = ccxt.binance({'apiKey': config['BINANCE_API'], 'secret': config['BINANCE_SECRET'], 'options': {'defaultType': 'future'}})
+        bal = ex.fetch_balance()
+        return float(bal['total']['USDT'])
+    except Exception as e: return f"Error: {str(e)[:30]}"
+
+# --- [ MONITORING LOGIC (70% Loss Alert) ] ---
+def monitor_account():
+    alert_sent = False
+    while True:
+        try:
+            if config['INITIAL_DEPOSIT'] > 0:
+                current_bal = get_balance()
+                if isinstance(current_bal, float):
+                    if current_bal <= (config['INITIAL_DEPOSIT'] * 0.3) and not alert_sent:
+                        send_telegram(f"🚨 <b>Alert!</b> 70% Loss ဖြစ်သွားပါပြီ။ Balance: ${current_bal:.2f}")
+                        config['IS_RUNNING'] = False
+                        alert_sent = True
+                    elif current_bal > (config['INITIAL_DEPOSIT'] * 0.3): alert_sent = False
+        except: pass
+        time.sleep(300)
+
+# --- [ TELEGRAM CONTROLLER ] ---
 def send_telegram(msg, markup=None):
-    if not config['CHAT_ID'] or not config['TELEGRAM_TOKEN']: return
+    if not config['CHAT_ID']: return
     url = f"https://api.telegram.org/bot{config['TELEGRAM_TOKEN']}/sendMessage"
     payload = {'chat_id': config['CHAT_ID'], 'text': msg, 'parse_mode': 'HTML'}
     if markup: payload['reply_markup'] = json.dumps(markup)
@@ -54,98 +78,56 @@ def send_telegram(msg, markup=None):
     except: pass
 
 def get_buttons():
+    # AI Mode အပေါ်မူတည်ပြီး Button နာမည်ပြောင်းပေးပါမယ်
+    ai_btn_text = "🤖 AI Mode: ON" if config['AI_MODE'] else "🎓 Talk to AI"
     return {"inline_keyboard": [
         [{"text": "📊 Status", "callback_data": "st"}, {"text": "💰 Balance", "callback_data": "bal"}],
-        [{"text": "🚀 Start", "callback_data": "on"}, {"text": "🛑 Stop", "callback_data": "off"}]
+        [{"text": ai_btn_text, "callback_data": "ai_toggle"}],
+        [{"text": "🚀 Start Bot", "callback_data": "on"}, {"text": "🛑 Stop Bot", "callback_data": "off"}]
     ]}
 
-# --- [ BINANCE TOOLS ] ---
-def get_balance():
-    try:
-        ex = ccxt.binance({
-            'apiKey': config['BINANCE_API'],
-            'secret': config['BINANCE_SECRET'],
-            'options': {'defaultType': 'future'}
-        })
-        bal = ex.fetch_balance()
-        return float(bal['total']['USDT'])
-    except: return None
-
-# --- [ MONITORING THREAD (70% LOSS ALERT) ] ---
-def monitor_account():
-    alert_sent = False
-    while True:
-        try:
-            if config['INITIAL_DEPOSIT'] > 0:
-                current_bal = get_balance()
-                if current_bal is not None:
-                    # ၇၀% ကုန်သွားလျှင် (ဆိုလိုသည်မှာ ၃၀% ပဲကျန်တော့လျှင်)
-                    if current_bal <= (config['INITIAL_DEPOSIT'] * 0.3) and not alert_sent:
-                        send_telegram(f"🚨 <b>အရေးကြီး သတိပေးချက်!</b>\nမင်းရဲ့ Balance က ရင်းနှီးငွေရဲ့ 70% ကျော် ကုန်သွားပါပြီ။\nလက်ရှိ Balance: ${current_bal:.2f}")
-                        config['IS_RUNNING'] = False
-                        alert_sent = True
-                    elif current_bal > (config['INITIAL_DEPOSIT'] * 0.3):
-                        alert_sent = False
-        except: pass
-        time.sleep(300) # ၅ မိနစ်တစ်ခါ စစ်မယ်
-
-# --- [ TELEGRAM CONTROLLER ] ---
 def handle_telegram():
     last_id = 0
     while True:
         try:
-            if not config['TELEGRAM_TOKEN']: 
-                time.sleep(5); continue
             url = f"https://api.telegram.org/bot{config['TELEGRAM_TOKEN']}/getUpdates"
             res = requests.get(url, params={'offset': last_id+1, 'timeout': 30}).json()
-            
             for up in res.get('result', []):
                 last_id = up['update_id']
                 if 'callback_query' in up:
                     cmd = up['callback_query']['data']
-                    if cmd == "bal":
-                        b = get_balance()
-                        send_telegram(f"💰 <b>လက်ရှိ Balance:</b> ${b if b else 'Error'} USDT")
-                    elif cmd == "st":
-                        send_telegram(f"⚙️ Status: {'ON' if config['IS_RUNNING'] else 'OFF'}\nLev: {config['LEVERAGE']}x", get_buttons())
+                    if cmd == "bal": send_telegram(f"💰 Balance: {get_balance()} USDT")
+                    elif cmd == "st": send_telegram(f"⚙️ Status: {'ON' if config['IS_RUNNING'] else 'OFF'}\n🤖 AI: {'Enabled' if config['AI_MODE'] else 'Disabled'}", get_buttons())
                     elif cmd == "on": config['IS_RUNNING'] = True; send_telegram("▶️ Bot Started.")
                     elif cmd == "off": config['IS_RUNNING'] = False; send_telegram("🛑 Bot Stopped.")
+                    elif cmd == "ai_toggle":
+                        config['AI_MODE'] = not config['AI_MODE']
+                        status = "ပိတ်" if not config['AI_MODE'] else "ဖွင့်"
+                        send_telegram(f"🤖 AI Chat Mode ကို {status}လိုက်ပါပြီ။", get_buttons())
 
                 elif 'message' in up:
                     msg = up['message']
                     text = msg.get('text', '')
-                    sender_id = str(msg['from']['id'])
-                    
-                    if sender_id != str(config['CHAT_ID']): continue
+                    if str(msg['from']['id']) != str(config['CHAT_ID']): continue
 
-                    if text.startswith('/deposit'):
-                        try:
-                            val = float(text.split(' ')[1])
-                            config['INITIAL_DEPOSIT'] = val
-                            send_telegram(f"✅ <b>Deposit သတ်မှတ်ပြီးပါပြီ:</b> ${val}\n၇၀% ကုန်ရင် သတိပေးပါ့မယ်။")
-                        except: send_telegram("⚠️ Format: <code>/deposit 100</code>")
-                    
-                    elif text == "/balance":
-                        b = get_balance()
-                        send_telegram(f"💰 <b>လက်ရှိလက်ကျန်:</b> ${b if b else 'Error'} USDT")
-                    
-                    elif text == "/start":
+                    if text == "/start":
                         send_telegram("🎓 Trinity Expert AI အဆင်သင့်ရှိပါသည်။", get_buttons())
-                        
-                    elif ai_model:
+                    elif text.startswith('/edit'):
+                        parts = text.split(' ', 2)
+                        if update_github(parts[1], parts[2]): send_telegram(f"✅ {parts[1]} Updated!")
+                        else: send_telegram("❌ Update failed.")
+                    elif text.startswith('/deposit'):
+                        try:
+                            config['INITIAL_DEPOSIT'] = float(text.split(' ')[1])
+                            send_telegram(f"✅ Deposit ${config['INITIAL_DEPOSIT']} သတ်မှတ်ပြီး။")
+                        except: send_telegram("Format: /deposit 100")
+                    elif config['AI_MODE'] and ai_model:
                         response = ai_model.generate_content(text)
-                        send_telegram(f"🎓 <b>Expert Insight:</b>\n\n{response.text}")
+                        send_telegram(f"🎓 <b>AI Insight:</b>\n\n{response.text}")
         except: time.sleep(5)
-
-# --- [ TRADING LOGIC ] ---
-def trade_logic():
-    while True:
-        if not config['IS_RUNNING']: time.sleep(10); continue
-        # Trading Scan Logic (1H-15M-5M) များကို ဤနေရာတွင် ထည့်သွင်းနိုင်သည်
-        time.sleep(60)
 
 if __name__ == "__main__":
     Thread(target=handle_telegram).start()
     Thread(target=monitor_account).start()
-    Thread(target=trade_logic).start()
-    run_flask()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
