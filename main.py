@@ -10,18 +10,26 @@ config = {
     'SYMBOLS': ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT'],
     'LEVERAGE': 20,
     'IS_RUNNING': True,
-    'GH_TOKEN': 'YOUR_GITHUB_TOKEN', # အပေါ်ကရတဲ့ Token ထည့်ပါ
+    'GH_TOKEN': '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', # အပေါ်ကရတဲ့ Token ထည့်ပါ
     'GH_REPO': 'username/repository_name', # ဥပမာ - myname/my-trading-bot
-    'GEMINI_API_KEY': 'YOUR_GEMINI_API_KEY'
+    'GEMINI_API_KEY': 'AIzaSyA8v-Q10qakjCIrDRxaIPyWqTxVvw9sDoA'
 }
+import os
+
+config = {
+    'API_KEY': os.getenv('L48AM3ytDBa3QUfW9qeLZj5X9xTJK8GK80Vc9fR4ml2Eo8QNRcjNdKisiz6EWj8F'),
+    'SECRET_KEY': os.getenv('EESYNU9Y4vwjHomlcGxglc25cvTpHU9jom88E2shCMW6q4xQyRCS833sBr26fORT'),
+    # ...
+}
+
 
 # Gemini Expert System
 SYSTEM_PROMPT = "You are a Triple Expert: Crypto Trader, Python Dev, and Finance Advisor. Help the user manage their bot and strategy."
 genai.configure(api_key=config['GEMINI_API_KEY'])
 ai_model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=SYSTEM_PROMPT)
 
-TELEGRAM_TOKEN = 'YOUR_BOT_TOKEN'
-CHAT_ID = 'YOUR_CHAT_ID'
+TELEGRAM_TOKEN = '7932915582:AAHT3p1J1gySMeWI5lJfVC2-hjqOR_KrgJ4'
+CHAT_ID = '5020993606'
 
 app = Flask('')
 @app.route('/')
