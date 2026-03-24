@@ -4,36 +4,39 @@ from datetime import datetime
 from flask import Flask
 from threading import Thread
 
-# --- [ EXPERT & GITHUB CONFIG ] ---
+# --- [ CONFIGURATION ] ---
+# Render Environment Variables ထဲမှာ သွားထည့်ပေးရမယ့် နာမည်များ
 config = {
-    'MODE': 'DEMO',
-    'SYMBOLS': ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT'],
+    'BINANCE_API': os.getenv('BINANCE_API', 'L48AM3ytDBa3QUfW9qeLZj5X9xTJK8GK80Vc9fR4ml2Eo8QNRcjNdKisiz6EWj8F'),
+    'BINANCE_SECRET': os.getenv('BINANCE_SECRET', 'EESYNU9Y4vwjHomlcGxglc25cvTpHU9jom88E2shCMW6q4xQyRCS833sBr26fORT'),
+    'GEMINI_KEY': os.getenv('GEMINI_API_KEY', 'AIzaSyA8v-Q10qakjCIrDRxaIPyWqTxVvw9sDoA'),
+    'GH_TOKEN': os.getenv('GH_TOKEN', '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'),
+    'GH_REPO': 'Kyawphyowaipro/my_crypto_bot', # မင်းရဲ့ GitHub Repo နာမည် ပြောင်းပေးပါ
+    'SYMBOL': ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT'],
     'LEVERAGE': 20,
-    'IS_RUNNING': True,
-    'GH_TOKEN': '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', # အပေါ်ကရတဲ့ Token ထည့်ပါ
-    'GH_REPO': 'username/repository_name', # ဥပမာ - myname/my-trading-bot
-    'GEMINI_API_KEY': 'AIzaSyA8v-Q10qakjCIrDRxaIPyWqTxVvw9sDoA'
+    'IS_RUNNING': True
 }
-import os
-
-config = {
-    'API_KEY': os.getenv('L48AM3ytDBa3QUfW9qeLZj5X9xTJK8GK80Vc9fR4ml2Eo8QNRcjNdKisiz6EWj8F'),
-    'SECRET_KEY': os.getenv('EESYNU9Y4vwjHomlcGxglc25cvTpHU9jom88E2shCMW6q4xQyRCS833sBr26fORT'),
-    # ...
-}
-
-
-# Gemini Expert System
-SYSTEM_PROMPT = "You are a Triple Expert: Crypto Trader, Python Dev, and Finance Advisor. Help the user manage their bot and strategy."
-genai.configure(api_key=config['GEMINI_API_KEY'])
-ai_model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=SYSTEM_PROMPT)
 
 TELEGRAM_TOKEN = '7932915582:AAHT3p1J1gySMeWI5lJfVC2-hjqOR_KrgJ4'
 CHAT_ID = '5020993606'
 
+# Gemini AI Setup with Expert Trinity Persona
+SYSTEM_PROMPT = """You are a Hybrid Expert: 
+1. Senior Crypto Trader (TA & Psychology)
+2. Professional Developer (Python & CCXT)
+3. Finance Advisor (Risk Management)
+Answer concisely in Burmese or English. Use your expert knowledge to guide the user."""
+
+try:
+    genai.configure(api_key=config['GEMINI_KEY'])
+    ai_model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=SYSTEM_PROMPT)
+except Exception as e:
+    print(f"Gemini AI Error: {e}")
+    ai_model = None
+
 app = Flask('')
 @app.route('/')
-def home(): return "Expert Bot with GitHub Sync is Online!"
+def home(): return "Expert Bot is Running!"
 
 def send_telegram(msg, reply_markup=None):
     try:
@@ -43,63 +46,83 @@ def send_telegram(msg, reply_markup=None):
         requests.post(url, json=payload)
     except: pass
 
-# --- [ GITHUB UPDATE FUNCTION ] ---
-def update_github_file(file_path, new_content, commit_message="Update via Telegram Bot"):
-    """GitHub API သုံးပြီး ဖိုင်ကို လှမ်းပြင်ခြင်း"""
-    url = f"https://api.github.com/repos/{config['GH_REPO']}/contents/{file_path}"
-    headers = {"Authorization": f"token {config['GH_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
-    
-    # လက်ရှိဖိုင်ရဲ့ SHA (ID) ကို အရင်ယူရပါမယ်
-    res = requests.get(url, headers=headers).json()
-    sha = res.get('sha')
-    
-    # Update လုပ်မည့် Data
-    content_encoded = base64.b64encode(new_content.encode('utf-8')).decode('utf-8')
-    data = {"message": commit_message, "content": content_encoded, "sha": sha}
-    
-    put_res = requests.put(url, headers=headers, json=data)
-    return put_res.status_code == 200
+def get_buttons():
+    return {"inline_keyboard": [[{"text": "📊 Status", "callback_data": "st"}, {"text": "🚀 Start", "callback_data": "on"}],
+                                [{"text": "🛑 Stop", "callback_data": "off"}]]}
 
-# --- [ TELEGRAM CONTROLLER ] ---
+# --- [ GITHUB REMOTE EDIT ] ---
+def update_github(file_path, content):
+    try:
+        url = f"https://api.github.com/repos/{config['GH_REPO']}/contents/{file_path}"
+        headers = {"Authorization": f"token {config['GH_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+        res = requests.get(url, headers=headers).json()
+        sha = res.get('sha')
+        data = {"message": "Update via Bot", "content": base64.b64encode(content.encode()).decode(), "sha": sha}
+        return requests.put(url, headers=headers, json=data).status_code == 200
+    except: return False
+
+# --- [ CONTROL CENTER ] ---
 def handle_telegram():
     last_id = 0
     while True:
         try:
-            res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates", params={'offset': last_id+1, 'timeout': 30}).json()
-            for up in res.get('result', []):
+            updates = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates", params={'offset': last_id+1, 'timeout': 30}).json()
+            for up in updates.get('result', []):
                 last_id = up['update_id']
-                message = up.get('message', {})
-                text = message.get('text', '')
-                sender = str(message.get('from', {}).get('id'))
-                if sender != CHAT_ID: continue
+                if 'callback_query' in up:
+                    cmd = up['callback_query']['data']
+                    if cmd == "st": send_telegram(f"⚙️ Running: {config['IS_RUNNING']}\nLev: {config['LEVERAGE']}x", get_buttons())
+                    elif cmd == "on": config['IS_RUNNING'] = True; send_telegram("▶️ Bot Started.")
+                    elif cmd == "off": config['IS_RUNNING'] = False; send_telegram("🛑 Bot Stopped.")
+                elif 'message' in up:
+                    text = up['message'].get('text', '')
+                    if text.startswith('/edit'):
+                        parts = text.split(' ', 2)
+                        if len(parts) == 3 and update_github(parts[1], parts[2]): send_telegram("✅ GitHub Updated!")
+                    elif ai_model:
+                        res = ai_model.generate_content(text)
+                        send_telegram(f"🎓 <b>Expert Insight:</b>\n\n{res.text}")
+        except: time.sleep(5)
 
-                # GitHub Edit Command: /edit_file [filename] [content]
-                if text.startswith('/edit'):
-                    try:
-                        _, filename, content = text.split(' ', 2)
-                        success = update_github_file(filename, content)
-                        if success: send_telegram(f"✅ GitHub: <b>{filename}</b> has been updated and deploying...")
-                        else: send_telegram("❌ GitHub Update Failed. Check Token/Repo name.")
-                    except: send_telegram("⚠️ Format: <code>/edit [filename] [new code]</code>")
-
-                elif not text.startswith('/'):
-                    # AI Expert Chat
-                    response = ai_model.generate_content(text)
-                    send_telegram(f"🎓 <b>Expert Insight:</b>\n\n{response.text}")
-        except: pass
-        time.sleep(2)
-
-# --- [ TRADING LOGIC (1H-15M-5M) ] ---
+# --- [ TRADING LOGIC: 1H-15M-5M ] ---
 def trade_logic():
-    # ... (ယခင်က ရေးပေးခဲ့တဲ့ 1H-15M-5M Triple Confirmation Logic အတိုင်းဖြစ်ပါတယ်) ...
-    # ... အရှည်ကြီးဖြစ်မှာစိုးလို့ အဓိက Scan ပိုင်းပဲ ပြန်ထည့်ပေးထားပါတယ် ...
+    try:
+        ex = ccxt.binance({'apiKey': config['BINANCE_API'], 'secret': config['BINANCE_SECRET'], 'enableRateLimit': True, 'options': {'defaultType': 'future'}})
+        if config['MODE'] == 'DEMO': ex.set_sandbox_mode(True)
+    except: return
+
+    last_h = 0
     while True:
-        if not config['IS_RUNNING']: time.sleep(10); continue
-        # Trading Scan များကို ဤနေရာတွင် ဆက်လက်လုပ်ဆောင်မည်...
+        if not config['IS_RUNNING']: time.sleep(30); continue
+        
+        # 15-Min Health Check
+        if time.time() - last_h > 900:
+            status = "🟢 <b>Health Check</b>\n"
+            for s in config['SYMBOL']:
+                try:
+                    p = ex.fetch_ohlcv(s, '1h', limit=200)
+                    ema = pd.DataFrame(p)[4].ewm(span=200).mean().iloc[-1]
+                    status += f"• {s}: {'📈 UP' if p[-1][4] > ema else '📉 DOWN'}\n"
+                except: pass
+            send_telegram(status); last_h = time.time()
+
+        for s in config['SYMBOL']:
+            try:
+                # Triple Confirmation Logic
+                p1h = ex.fetch_ohlcv(s, '1h', limit=200)
+                ema200 = pd.DataFrame(p1h)[4].ewm(span=200).mean().iloc[-1]
+                p15 = ex.fetch_ohlcv(s, '15m', limit=2)
+                p5 = pd.DataFrame(ex.fetch_ohlcv(s, '5m', limit=10), columns=['t','o','h','l','c','v'])
+                
+                bull = p5.iloc[-1]['c'] > p5.iloc[-1]['o'] and p5.iloc[-2]['c'] < p5.iloc[-2]['o']
+                if bull and p15[-1][4] > ema200:
+                    send_telegram(f"🚀 <b>LONG Entry: {s}</b>\nLeverage: {config['LEVERAGE']}x")
+            except: pass
         time.sleep(60)
 
 if __name__ == "__main__":
     Thread(target=handle_telegram).start()
     port = int(os.environ.get("PORT", 10000))
-    Thread(target=lambda: app.run(host='0.0.0.0', port=port)).start()
-    trade_logic()
+    # Flask ကို Thread ထဲမထည့်ဘဲ ပင်မ Thread မှာ Run မှ Render က Port ကို ရှာတွေ့မှာဖြစ်ပါတယ်
+    Thread(target=trade_logic).start()
+    app.run(host='0.0.0.0', port=port)
