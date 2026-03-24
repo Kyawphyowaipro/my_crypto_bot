@@ -4,3 +4,4 @@ stockstats
 flask
 pytz
 requests
+google-generativeai
