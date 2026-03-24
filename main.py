@@ -15,7 +15,7 @@ config = {
     'SYMBOL': ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT'],
     'LEVERAGE': 20,
     'IS_RUNNING': True,
-    'INITIAL_DEPOSIT': 0.0,
+    'INITIAL_DEPOSIT': 100.0,
     'AI_MODE': False # AI နှင့် စကားပြောရန် Mode
 }
 
