@@ -1,7 +1,5 @@
-ccxt
-pandas
-stockstats
+google-generativeai>=0.5.0
+ccxt>=4.0.0
+requests
 flask
 pytz
-requests
-google-generativeai
