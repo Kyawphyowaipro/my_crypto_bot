@@ -28,7 +28,7 @@ def get_ai_insight(text):
     if not config['GEMINI_KEY']: return "⚠️ Gemini API Key missing in Render."
     try:
         genai.configure(api_key=config['GEMINI_KEY'])
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         # AI ကို ပိုမိုမြန်ဆန်စေရန် system prompt အတိုပဲ သုံးထားသည်
         response = model.generate_content(f"Trader Advisor: {text}")
         return response.text
@@ -73,8 +73,7 @@ def handle_telegram():
                             ex = ccxt.binance({'apiKey': config['BINANCE_API'], 'secret': config['BINANCE_SECRET'], 'options': {'defaultType': 'future'}})
                             b = ex.fetch_balance()['total']['USDT']
                             send_telegram(f"💰 <b>Balance:</b> ${b:.2f} USDT")
-                        except Exception as e:
-                            send_telegram(f"❌ API Error: {str(e)[:60]}")
+                        except: send_telegram("❌ API Error: Check Keys.")
                     elif cmd == "st": send_telegram("⚙️ <b>Dashboard Active</b>", get_menu())
                     elif cmd == "tg_ai": 
                         config['AI_MODE'] = not config['AI_MODE']
