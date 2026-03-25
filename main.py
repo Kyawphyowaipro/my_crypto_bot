@@ -1,25 +1,19 @@
+import os
+# IMPORTANT: Numba ကို လုံးဝ အသုံးမပြုရန် ပိတ်ထားခြင်း
+os.environ['PANDAS_TA_NUMBA'] = '0'
+
 import ccxt
 import pandas as pd
 import pandas_ta as ta
-import time
-import os
 import requests
 import threading
+import time
 from flask import Flask
 from datetime import datetime
 
-# --- FLASK SERVER FOR RENDER ---
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Trading Bot is Running! 🚀"
-
-@app.route('/health')
-def health():
-    return {"status": "healthy", "timestamp": str(datetime.now())}
-
-# --- CONFIGURATION FROM ENVIRONMENT ---
+# Environment Variables
 API_KEY = os.getenv('BINANCE_API_KEY')
 API_SECRET = os.getenv('BINANCE_API_SECRET')
 TG_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -27,66 +21,81 @@ CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 PAIRS = ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT', 'BNB/USDT', 'DASH/USDT']
 
-# --- BOT LOGIC ---
 def send_tg(msg):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": f"🤖 {msg}", "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+    try:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": CHAT_ID, 
+            "text": f"🤖 *REPORT*\n{msg}", 
+            "parse_mode": "Markdown"
+        }
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"TG Error: {e}")
 
-def trade_logic():
+def bot_job():
+    # API initialization inside thread
     exchange = ccxt.binance({
         'apiKey': API_KEY,
         'secret': API_SECRET,
-        'options': {'defaultType': 'future'}
+        'options': {'defaultType': 'future'},
+        'enableRateLimit': True
     })
-    
-    send_tg("Bot started as Web Service. Monitoring active.")
-    
+
+    send_tg("🚀 Bot is live on Render (Numba-free version).")
+
     while True:
         try:
-            # Session Check (London/NY)
-            now_hour = datetime.utcnow().hour
-            if not (7 <= now_hour <= 21):
-                # Low activity message 
-                if now_hour % 4 == 0: # ၄ နာရီတစ်ခါပဲ report ပို့မယ် (ညဘက် အနှောင့်အယှက်မဖြစ်အောင်)
-                    send_tg("💤 Session closed. Bot is idling...")
+            # Session Check
+            now_utc = datetime.utcnow().hour
+            if not (7 <= now_utc <= 21):
+                if now_utc % 4 == 0:
+                    send_tg("💤 System Status: Market outside session window. Idling...")
                 time.sleep(1800)
                 continue
 
             for symbol in PAIRS:
-                # Fetch Data
-                bars = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=100)
-                df = pd.DataFrame(bars, columns=['time', 'open', 'high', 'low', 'close', 'vol'])
+                # Fetching 1H candles
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=105)
+                df = pd.DataFrame(ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'vol'])
                 
-                # Indicators
-                df['ema21'] = ta.ema(df['close'], 21)
-                df['ema55'] = ta.ema(df['close'], 55)
-                df['ema100'] = ta.ema(df['close'], 100)
-                df['rsi'] = ta.rsi(df['close'], 14)
-                df['atr'] = ta.atr(df['high'], df['low'], df['close'], 14)
-                
-                last = df.iloc[-1]
-                
-                # Strategy: EMA Alignment + RSI
-                is_bullish = last['ema21'] > last['ema55'] > last['ema100']
-                is_bearish = last['ema21'] < last['ema55'] < last['ema100']
-                
-                if is_bullish and last['rsi'] > 55:
-                    send_tg(f"📈 *BULLISH SIGNAL*: {symbol}\nPrice: {last['close']}\nATR: {last['atr']:.2f}")
-                elif is_bearish and last['rsi'] < 45:
-                    send_tg(f"📉 *BEARISH SIGNAL*: {symbol}\nPrice: {last['close']}\nATR: {last['atr']:.2f}")
+                # Indicators (Numba မလိုသော Standard Pandas Calculation)
+                df['ema21'] = ta.ema(df['close'], length=21)
+                df['ema55'] = ta.ema(df['close'], length=55)
+                df['ema100'] = ta.ema(df['close'], length=100)
+                df['rsi'] = ta.rsi(df['close'], length=14)
+                df['atr'] = ta.atr(df['high'], df['low'], df['close'], length=14)
 
-            time.sleep(600) # ၁၀ မိနစ်တစ်ခါ check လုပ်မယ်
+                curr = df.iloc[-1]
+                
+                # Logic: EMA Alignment
+                bullish = curr['ema21'] > curr['ema55'] > curr['ema100']
+                bearish = curr['ema21'] < curr['ema55'] < curr['ema100']
+
+                # Entry Check
+                if bullish and curr['rsi'] > 55:
+                    send_tg(f"⚡ *BUY SIGNAL* - {symbol}\nPrice: {curr['close']}\nStrategy: EMA Trend Follow")
+                elif bearish and curr['rsi'] < 45:
+                    send_tg(f"🔻 *SELL SIGNAL* - {symbol}\nPrice: {curr['close']}\nStrategy: EMA Trend Follow")
+
+            # Hourly Pulse
+            if datetime.now().minute < 10:
+                send_tg(f"📊 Hourly Check: Bot is monitoring {len(PAIRS)} pairs. No errors.")
+
+            time.sleep(600) # 10 mins interval
 
         except Exception as e:
-            send_tg(f"⚠️ Error: {str(e)}")
+            send_tg(f"⚠️ Runtime Error: `{str(e)}`")
             time.sleep(300)
 
-# --- STARTUP ---
+@app.route('/')
+def health():
+    return "Bot is Active and Healthy!"
+
 if __name__ == "__main__":
-    # Trading Logic ကို Background မှာ run မယ်
-    threading.Thread(target=trade_logic, daemon=True).start()
+    # Background Thread for Trading
+    threading.Thread(target=bot_job, daemon=True).start()
     
-    # Web Server ကို Port 10000 (Render default) မှာ run မယ်
+    # Port for Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
