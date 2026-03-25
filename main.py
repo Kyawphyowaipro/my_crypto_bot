@@ -1,98 +1,92 @@
-import ccxt, pandas as pd, time, os, requests, json, pytz
-import google.generativeai as genai
+import ccxt
+import pandas as pd
+import pandas_ta as ta
+import time
+import os
+import requests
+import threading
 from flask import Flask
-from threading import Thread
+from datetime import datetime
 
-# --- [ ၁။ CONFIGURATION & AUTO-STRIP KEYS ] ---
-def get_clean_env(key_name):
-    # .env ထဲက Key တွေမှာ Space ပါနေရင် အလိုအလျောက် ဖယ်ထုတ်ရန်
-    val = os.getenv(key_name)
-    return val.strip() if val else ""
+# --- FLASK SERVER FOR RENDER ---
+app = Flask(__name__)
 
-config = {
-    'BINANCE_API': get_clean_env('BINANCE_API'),
-    'BINANCE_SECRET': get_clean_env('BINANCE_SECRET'),
-    'GEMINI_KEY': get_clean_env('GEMINI_API_KEY'),
-    'TELEGRAM_TOKEN': get_clean_env('TELEGRAM_TOKEN'),
-    'CHAT_ID': get_clean_env('TELEGRAM_CHAT_ID'),
-    'SYMBOL': ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT'],
-    'IS_RUNNING': True,
-    'AI_MODE': False
-}
+@app.route('/')
+def home():
+    return "Trading Bot is Running! 🚀"
 
-# --- [ ၂။ STABLE AI ADVISOR - FIX 404 & MODEL ISSUE ] ---
-def get_ai_insight(text):
-    if not config['GEMINI_KEY']: return "⚠️ Gemini API Key missing in Render."
-    try:
-        genai.configure(api_key=config['GEMINI_KEY'])
-        # 404 model not found ဖြစ်ခြင်းကို ဖြေရှင်းရန်
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(f"Answer as a pro crypto trader in Burmese: {text}")
-        return response.text
-    except Exception as e:
-        return f"❌ AI System Error: {str(e)[:50]}"
+@app.route('/health')
+def health():
+    return {"status": "healthy", "timestamp": str(datetime.now())}
 
-# --- [ ၃။ TELEGRAM INTERFACE ] ---
-def send_telegram(msg, markup=None):
-    url = f"https://api.telegram.org/bot{config['TELEGRAM_TOKEN']}/sendMessage"
-    payload = {'chat_id': config['CHAT_ID'], 'text': msg, 'parse_mode': 'HTML'}
-    if markup: payload['reply_markup'] = json.dumps(markup)
-    try: requests.post(url, json=payload, timeout=10)
-    except: pass
+# --- CONFIGURATION FROM ENVIRONMENT ---
+API_KEY = os.getenv('BINANCE_API_KEY')
+API_SECRET = os.getenv('BINANCE_API_SECRET')
+TG_TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-def get_menu():
-    ai_status = "🤖 AI Advisor: ON" if config['AI_MODE'] else "🎓 Ask Advisor"
-    return {"inline_keyboard": [
-        [{"text": "📊 Dashboard", "callback_data": "st"}, {"text": "💰 Balance", "callback_data": "bal"}],
-        [{"text": ai_status, "callback_data": "tg_ai"}],
-        [{"text": "🚀 Start Bot", "callback_data": "on"}, {"text": "🛑 Stop Bot", "callback_data": "off"}]
-    ]}
+PAIRS = ['SOL/USDT', 'CAKE/USDT', 'LTC/USDT', 'BNB/USDT', 'DASH/USDT']
 
-# --- [ ၄။ HANDLERS & BOT LOGIC ] ---
-def handle_telegram():
-    last_id = 0
+# --- BOT LOGIC ---
+def send_tg(msg):
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {"chat_id": CHAT_ID, "text": f"🤖 {msg}", "parse_mode": "Markdown"}
+    requests.post(url, json=payload)
+
+def trade_logic():
+    exchange = ccxt.binance({
+        'apiKey': API_KEY,
+        'secret': API_SECRET,
+        'options': {'defaultType': 'future'}
+    })
+    
+    send_tg("Bot started as Web Service. Monitoring active.")
+    
     while True:
         try:
-            url = f"https://api.telegram.org/bot{config['TELEGRAM_TOKEN']}/getUpdates"
-            res = requests.get(url, params={'offset': last_id+1, 'timeout': 20}).json()
-            if not res.get('ok'): continue
-            
-            for up in res['result']:
-                last_id = up['update_id']
-                if 'callback_query' in up:
-                    cq = up['callback_query']; cmd = cq['data']
-                    requests.post(f"https://api.telegram.org/bot{config['TELEGRAM_TOKEN']}/answerCallbackQuery", json={'callback_query_id': cq['id']})
-                    
-                    if cmd == "bal":
-                        try:
-                            # Binance API Error ကာကွယ်ရန်
-                            ex = ccxt.binance({'apiKey': config['BINANCE_API'], 'secret': config['BINANCE_SECRET'], 'options': {'defaultType': 'future'}})
-                            b = ex.fetch_balance()['total']['USDT']
-                            send_telegram(f"💰 <b>Current Balance:</b> ${b:.2f} USDT")
-                        except: send_telegram("❌ Binance API Connection Failed.")
-                    elif cmd == "st": send_telegram("⚙️ <b>Trinity Bot Status: Active</b>", get_menu())
-                    elif cmd == "tg_ai": 
-                        config['AI_MODE'] = not config['AI_MODE']
-                        send_telegram(f"AI Advisor is now: {'ON' if config['AI_MODE'] else 'OFF'}", get_menu())
-                    elif cmd == "on": config['IS_RUNNING'] = True; send_telegram("▶️ Trading Engine Started.")
-                    elif cmd == "off": config['IS_RUNNING'] = False; send_telegram("🛑 Trading Engine Stopped.")
+            # Session Check (London/NY)
+            now_hour = datetime.utcnow().hour
+            if not (7 <= now_hour <= 21):
+                # Low activity message 
+                if now_hour % 4 == 0: # ၄ နာရီတစ်ခါပဲ report ပို့မယ် (ညဘက် အနှောင့်အယှက်မဖြစ်အောင်)
+                    send_tg("💤 Session closed. Bot is idling...")
+                time.sleep(1800)
+                continue
 
-                elif 'message' in up:
-                    msg = up['message']; text = msg.get('text', '')
-                    if str(msg['from']['id']) == str(config['CHAT_ID']):
-                        if text == "/start": send_telegram("🎓 <b>Trinity Professional System Online</b>", get_menu())
-                        elif config['AI_MODE']: 
-                            send_telegram("⏳ <i>Thinking...</i>")
-                            send_telegram(f"🎓 <b>Advisor Insight:</b>\n\n{get_ai_insight(text)}")
-        except: time.sleep(5)
+            for symbol in PAIRS:
+                # Fetch Data
+                bars = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=100)
+                df = pd.DataFrame(bars, columns=['time', 'open', 'high', 'low', 'close', 'vol'])
+                
+                # Indicators
+                df['ema21'] = ta.ema(df['close'], 21)
+                df['ema55'] = ta.ema(df['close'], 55)
+                df['ema100'] = ta.ema(df['close'], 100)
+                df['rsi'] = ta.rsi(df['close'], 14)
+                df['atr'] = ta.atr(df['high'], df['low'], df['close'], 14)
+                
+                last = df.iloc[-1]
+                
+                # Strategy: EMA Alignment + RSI
+                is_bullish = last['ema21'] > last['ema55'] > last['ema100']
+                is_bearish = last['ema21'] < last['ema55'] < last['ema100']
+                
+                if is_bullish and last['rsi'] > 55:
+                    send_tg(f"📈 *BULLISH SIGNAL*: {symbol}\nPrice: {last['close']}\nATR: {last['atr']:.2f}")
+                elif is_bearish and last['rsi'] < 45:
+                    send_tg(f"📉 *BEARISH SIGNAL*: {symbol}\nPrice: {last['close']}\nATR: {last['atr']:.2f}")
 
-# --- [ ၅။ FLASK & PORT BINDING (RENDER FIX) ] ---
-app = Flask('')
-@app.route('/')
-def home(): return "Trinity Bot is Live."
+            time.sleep(600) # ၁၀ မိနစ်တစ်ခါ check လုပ်မယ်
 
+        except Exception as e:
+            send_tg(f"⚠️ Error: {str(e)}")
+            time.sleep(300)
+
+# --- STARTUP ---
 if __name__ == "__main__":
-    # Render မှာ "Port scan timeout" မဖြစ်စေရန် Flask ကို Main Thread မှာပဲ Run ရပါမယ်
-    Thread(target=handle_telegram, daemon=True).start()
+    # Trading Logic ကို Background မှာ run မယ်
+    threading.Thread(target=trade_logic, daemon=True).start()
+    
+    # Web Server ကို Port 10000 (Render default) မှာ run မယ်
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
